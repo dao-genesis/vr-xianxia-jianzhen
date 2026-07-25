@@ -27,11 +27,13 @@ VR: 手柄/手 射线指物体+扣扳机/捏合=抓取移动 · 松开=放下<br
   <button id="bLamp">+ 灯</button>
   <button id="bSave">保存</button>
   <button id="bReset">清空</button>
+  <button id="bSplat">泼溅底景</button>
   <button id="bVR">进入VR</button>
 </div>
 <script type="importmap">
 {"imports":{"three":"./vendor/three.module.js",
-"three/addons/":"./vendor/"}}
+"three/addons/":"./vendor/",
+"@sparkjsdev/spark":"./vendor/spark.module.js"}}
 </script>
 <script>
 window.beacon=s=>{try{fetch('/ping?stage='+encodeURIComponent(s))}catch(e){}};
@@ -75,6 +77,36 @@ ground.rotation.x=-Math.PI/2;scene.add(ground);
 const grid=new THREE.GridHelper(40,40,0x2f4f6f,0x1c2c3c);grid.position.y=.01;scene.add(grid);
 scene.add(new THREE.HemisphereLight(0x9db4ff,0x28180a,1.1));
 const sun=new THREE.DirectionalLight(0xffe0b0,1.4);sun.position.set(5,8,3);scene.add(sun);
+
+/* ---------- 泼溅底景(3D高斯泼溅·照片级真实场景) ---------- */
+const SPLAT_KEY='daoshu.splat.v1';
+const SPLAT_SCENE={ // WorldLabs 云端仙宫 (与 xianxia_worldlabs 同源已验证)
+  url:'https://cdn.marble.worldlabs.ai/17f76543-a07f-4447-adb0-38a529b9e672/b0150f15-ebb2-4550-8c89-bfe765340d53_ceramic_500k.spz',
+  scale:1.359,groundOffset:1.362};
+let _splat=null,_splatLoading=false;
+async function toggleSplat(){
+  if(_splat){scene.remove(_splat);_splat=null;sky.visible=ground.visible=grid.visible=true;
+    localStorage.removeItem(SPLAT_KEY);beacon('splat-off');return;}
+  if(_splatLoading)return;_splatLoading=true;
+  try{
+    beacon('splat-loading');
+    const spark=await import('@sparkjsdev/spark');
+    if(!scene.userData.sparkRenderer){
+      const sr=new spark.SparkRenderer({renderer,maxStdDev:Math.sqrt(5)});
+      scene.add(sr);scene.userData.sparkRenderer=sr;}
+    const m=new spark.SplatMesh({url:SPLAT_SCENE.url});
+    m.scale.setScalar(SPLAT_SCENE.scale);
+    m.position.y=SPLAT_SCENE.groundOffset*SPLAT_SCENE.scale;
+    m.quaternion.identity();
+    scene.add(m);_splat=m;
+    sky.visible=ground.visible=grid.visible=false;
+    localStorage.setItem(SPLAT_KEY,'1');
+    beacon('splat-on');
+  }catch(e){beacon('splat-error '+String(e).slice(0,100));}
+  _splatLoading=false;
+}
+document.getElementById('bSplat').onclick=toggleSplat;
+if(localStorage.getItem(SPLAT_KEY)||location.search.indexOf('splat=1')>-1)toggleSplat();
 
 /* ---------- 可布局物件系统: 世界=数据 ---------- */
 const movables=[];   // {obj, spec}
