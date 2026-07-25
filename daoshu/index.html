@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>道枢主页 · 世界容器 v0.1</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{margin:0;overflow:hidden;background:#000;font-family:system-ui,sans-serif}
+  #hud{position:fixed;top:10px;left:10px;z-index:9;color:#eee;background:rgba(0,0,0,.55);
+    padding:10px 14px;border-radius:12px;font-size:14px;max-width:340px}
+  #hud b{color:#ffd54f}
+  #bar{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);z-index:9;display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+  #bar button{background:#1e2a38;color:#ffd54f;border:1px solid #3a4a5a;border-radius:10px;
+    padding:10px 14px;font-size:14px;cursor:pointer}
+  #bar button:active{background:#31465c}
+</style>
+</head>
+<body>
+<div id="hud"><b>道枢主页 · 世界容器 v0.1</b><br>
+桌面: 拖动物体=左键拖 · 视角=右键 · 底栏添加物件<br>
+VR: 手柄/手 射线指物体+扣扳机/捏合=抓取移动 · 松开=放下<br>
+布局自动保存(world.json → localStorage)</div>
+<div id="bar">
+  <button id="bAdd">+ 仙鹤</button>
+  <button id="bBox">+ 灵石</button>
+  <button id="bScreen">+ 影院幕布</button>
+  <button id="bLamp">+ 灯</button>
+  <button id="bSave">保存</button>
+  <button id="bReset">清空</button>
+  <button id="bVR">进入VR</button>
+</div>
+<script type="importmap">
+{"imports":{"three":"./vendor/three.module.js",
+"three/addons/":"./vendor/"}}
+</script>
+<script>
+window.beacon=s=>{try{fetch('/ping?stage='+encodeURIComponent(s))}catch(e){}};
+beacon('html-loaded ua='+navigator.userAgent.slice(0,80));
+window.onerror=(m,src,l)=>beacon('error '+String(m).slice(0,120)+' @'+l);
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {VRButton} from 'three/addons/webxr/VRButton.js';
+
+const WORLD_KEY='daoshu.world.v1';
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x0a1020);
+scene.fog=new THREE.Fog(0x0a1020,18,60);
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.05,200);
+camera.position.set(0,1.6,3);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+renderer.xr.enabled=true;
+document.body.appendChild(renderer.domElement);
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+
+/* ---------- 环境: 天穹 + 山雾 + 地面 ---------- */
+const sky=new THREE.Mesh(new THREE.SphereGeometry(90,32,16),
+  new THREE.ShaderMaterial({side:THREE.BackSide,uniforms:{t:{value:0}},
+  vertexShader:`varying vec3 p;void main(){p=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader:`varying vec3 p;uniform float t;
+  void main(){float h=normalize(p).y*.5+.5;
+  vec3 c=mix(vec3(.04,.06,.13),vec3(.35,.22,.45),pow(h,1.6));
+  c+=vec3(.9,.75,.4)*pow(max(0.,1.-abs(h-.28)*6.),3.)*.35;
+  float s=fract(sin(dot(floor(p.xy*8.)+floor(p.z*8.),vec2(12.9898,78.233)))*43758.5);
+  if(h>.5&&s>.997)c+=vec3(.8);
+  gl_FragColor=vec4(c,1.);}`}));
+scene.add(sky);
+const ground=new THREE.Mesh(new THREE.CircleGeometry(40,64),
+  new THREE.MeshStandardMaterial({color:0x18232f,roughness:.9}));
+ground.rotation.x=-Math.PI/2;scene.add(ground);
+const grid=new THREE.GridHelper(40,40,0x2f4f6f,0x1c2c3c);grid.position.y=.01;scene.add(grid);
+scene.add(new THREE.HemisphereLight(0x9db4ff,0x28180a,1.1));
+const sun=new THREE.DirectionalLight(0xffe0b0,1.4);sun.position.set(5,8,3);scene.add(sun);
+
+/* ---------- 可布局物件系统: 世界=数据 ---------- */
+const movables=[];   // {obj, spec}
+const loader=new GLTFLoader();
+const CATALOG={
+  crane:{name:'仙鹤',make:async()=>{ // 程序化仙鹤(免外网模型依赖): 身+颈+翅
+    const g=new THREE.Group();
+    const white=new THREE.MeshStandardMaterial({color:0xf5f5f0,roughness:.6});
+    const body=new THREE.Mesh(new THREE.SphereGeometry(.22,16,12),white);body.scale.set(1.5,1,1);g.add(body);
+    const neck=new THREE.Mesh(new THREE.CylinderGeometry(.035,.05,.55,8),white);
+    neck.position.set(.28,.32,0);neck.rotation.z=-.5;g.add(neck);
+    const head=new THREE.Mesh(new THREE.SphereGeometry(.07,10,8),white);head.position.set(.42,.58,0);g.add(head);
+    const beak=new THREE.Mesh(new THREE.ConeGeometry(.02,.14,6),new THREE.MeshStandardMaterial({color:0xcc4422}));
+    beak.rotation.z=-Math.PI/2;beak.position.set(.53,.57,0);g.add(beak);
+    const crown=new THREE.Mesh(new THREE.SphereGeometry(.025,8,6),new THREE.MeshStandardMaterial({color:0xdd2222}));
+    crown.position.set(.42,.65,0);g.add(crown);
+    for(const s of[-1,1]){const wing=new THREE.Mesh(new THREE.SphereGeometry(.2,12,8),white);
+      wing.scale.set(1.4,.15,.8);wing.position.set(-.05,.12,.18*s);wing.rotation.x=.35*s;g.add(wing);}
+    for(const s of[-1,1]){const leg=new THREE.Mesh(new THREE.CylinderGeometry(.012,.012,.5,6),
+      new THREE.MeshStandardMaterial({color:0x333}));leg.position.set(0,-.4,.07*s);g.add(leg);}
+    g.userData.anim=t=>{g.position.y=g.userData.baseY+Math.sin(t*1.5)*.05;};
+    return g;}},
+  rock:{name:'灵石',make:async()=>{
+    const m=new THREE.Mesh(new THREE.IcosahedronGeometry(.3,0),
+      new THREE.MeshStandardMaterial({color:0x557788,roughness:.4,metalness:.3,emissive:0x113355,emissiveIntensity:.6}));
+    m.userData.anim=t=>{m.rotation.y=t*.3;m.material.emissiveIntensity=.4+Math.sin(t*2)*.25;};
+    return m;}},
+  screen:{name:'影院幕布',make:async(spec)=>{
+    const g=new THREE.Group();
+    const frame=new THREE.Mesh(new THREE.BoxGeometry(2.16,1.26,.04),new THREE.MeshStandardMaterial({color:0x111}));
+    g.add(frame);
+    let tex, video=null;
+    if(spec.videoUrl){
+      video=document.createElement('video');
+      video.crossOrigin='anonymous';video.loop=true;video.muted=true;video.playsInline=true;
+      video.src=spec.videoUrl;
+      tex=new THREE.VideoTexture(video);
+      g.userData.onGrab=()=>video.play().catch(()=>{});
+      setTimeout(()=>video.play().catch(()=>{}),1200);
+    }else{
+      const cv=document.createElement('canvas');cv.width=512;cv.height=288;
+      const cx=cv.getContext('2d');
+      tex=new THREE.CanvasTexture(cv);
+      g.userData.anim=t=>{
+        const gr=cx.createLinearGradient(0,0,512,288);
+        gr.addColorStop(0,'hsl('+((t*20)%360)+',60%,25%)');
+        gr.addColorStop(1,'hsl('+((t*20+120)%360)+',60%,12%)');
+        cx.fillStyle=gr;cx.fillRect(0,0,512,288);
+        cx.fillStyle='#ffd54f';cx.font='48px sans-serif';cx.textAlign='center';
+        cx.fillText('道枢影院',256,130);
+        cx.font='22px sans-serif';cx.fillStyle='#ccc';
+        cx.fillText('幕布就绪 · 可换任意视频源',256,180);
+        tex.needsUpdate=true;
+      };
+    }
+    tex.colorSpace=THREE.SRGBColorSpace;
+    const shade=new THREE.Mesh(new THREE.PlaneGeometry(2.05,1.15),new THREE.MeshBasicMaterial({map:tex}));
+    shade.position.z=.025;g.add(shade);
+    return g;}},
+  lamp:{name:'灯',make:async()=>{
+    const g=new THREE.Group();
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(.03,.05,1.2,8),new THREE.MeshStandardMaterial({color:0x444}));
+    pole.position.y=.6;g.add(pole);
+    const bulb=new THREE.Mesh(new THREE.SphereGeometry(.12,12,8),
+      new THREE.MeshStandardMaterial({color:0xffe9a0,emissive:0xffc040,emissiveIntensity:1.2}));
+    bulb.position.y=1.3;g.add(bulb);
+    const pt=new THREE.PointLight(0xffc060,6,6);pt.position.y=1.3;g.add(pt);
+    g.userData.toggle=()=>{const on=pt.intensity>0;pt.intensity=on?0:6;
+      bulb.material.emissiveIntensity=on?0:1.2;};
+    return g;}},
+  gltf:{name:'外部模型',make:async(spec)=>new Promise((res,rej)=>{
+    loader.load(spec.url,r=>{const g=r.scene;
+      const box=new THREE.Box3().setFromObject(g);const s=1/Math.max(...box.getSize(new THREE.Vector3()).toArray());
+      g.scale.setScalar(s*(spec.scale||1));res(g);},undefined,rej);})},
+};
+async function spawn(spec,save=true){
+  const c=CATALOG[spec.type];if(!c)return;
+  let obj;try{obj=await c.make(spec);}catch(e){console.warn('load fail',e);return;}
+  obj.position.fromArray(spec.pos||[0,1,-1.5]);
+  obj.rotation.y=spec.rotY||0;
+  if(spec.scale&&spec.type!=='gltf')obj.scale.setScalar(spec.scale);
+  obj.userData.baseY=obj.position.y;obj.userData.spec=spec;
+  scene.add(obj);movables.push(obj);
+  if(save)saveWorld();
+  return obj;
+}
+function serialize(){return movables.map(o=>({...o.userData.spec,
+  pos:o.position.toArray().map(v=>+v.toFixed(3)),rotY:+o.rotation.y.toFixed(3)}));}
+function saveWorld(){localStorage.setItem(WORLD_KEY,JSON.stringify(serialize()));}
+async function loadWorld(){
+  let d;try{d=JSON.parse(localStorage.getItem(WORLD_KEY));}catch(e){}
+  if(!d||!d.length)d=[ // 默认主页布局
+    {type:'crane',pos:[-1.6,1.1,-2.2]},
+    {type:'rock',pos:[1.4,.9,-2]},
+    {type:'screen',pos:[0,1.7,-3.4]},
+    {type:'lamp',pos:[2.4,0,-1.2]},
+  ];
+  for(const s of d)await spawn(s,false);
+}
+loadWorld();
+
+/* ---------- 桌面交互 ---------- */
+const controls=new OrbitControls(camera,renderer.domElement);
+controls.target.set(0,1.2,-1.5);controls.mouseButtons.LEFT=null;controls.mouseButtons.RIGHT=THREE.MOUSE.ROTATE;
+const ray=new THREE.Raycaster();const mouse=new THREE.Vector2();
+let dragObj=null;const dragPlane=new THREE.Plane();
+function pick(e){
+  mouse.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(mouse,camera);
+  for(const o of movables){const hit=ray.intersectObject(o,true);
+    if(hit.length)return {o,p:hit[0].point};}
+  return null;
+}
+renderer.domElement.addEventListener('pointerdown',e=>{
+  if(e.button!==0)return;const h=pick(e);
+  if(h){dragObj=h.o;dragPlane.setFromNormalAndCoplanarPoint(
+    camera.getWorldDirection(new THREE.Vector3()).negate(),h.p);
+    dragObj.userData.onGrab&&dragObj.userData.onGrab();}
+});
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(!dragObj)return;
+  mouse.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1);
+  ray.setFromCamera(mouse,camera);
+  const p=new THREE.Vector3();ray.ray.intersectPlane(dragPlane,p);
+  if(p)dragObj.position.copy(p);dragObj.userData.baseY=dragObj.position.y;
+});
+addEventListener('pointerup',()=>{if(dragObj){saveWorld();dragObj=null;}});
+renderer.domElement.addEventListener('dblclick',e=>{const h=pick(e);
+  h&&h.o.userData.toggle&&h.o.userData.toggle();});
+
+/* ---------- VR 交互: 手柄+裸手 射线抓取 ---------- */
+document.getElementById('bVR').onclick=()=>document.querySelector('#VRButton, button#VRButton')?.click();
+const vrBtn=VRButton.createButton(renderer,{optionalFeatures:['hand-tracking']});
+vrBtn.style.display='none';document.body.appendChild(vrBtn);
+document.getElementById('bVR').onclick=()=>vrBtn.click();
+const tempM=new THREE.Matrix4();
+function setupCtl(i){
+  const ctl=renderer.xr.getController(i);
+  const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(),new THREE.Vector3(0,0,-5)]),
+    new THREE.LineBasicMaterial({color:0xffd54f}));
+  ctl.add(line);scene.add(ctl);
+  const hand=renderer.xr.getHand(i);scene.add(hand);
+  let held=null;
+  const grab=()=>{
+    tempM.identity().extractRotation(ctl.matrixWorld);
+    ray.ray.origin.setFromMatrixPosition(ctl.matrixWorld);
+    ray.ray.direction.set(0,0,-1).applyMatrix4(tempM);
+    for(const o of movables){const hit=ray.intersectObject(o,true);
+      if(hit.length){held=o;ctl.attach(o);o.userData.onGrab&&o.userData.onGrab();
+        o.userData.toggle&&o.userData.toggle();break;}}
+  };
+  const release=()=>{if(held){scene.attach(held);held.userData.baseY=held.position.y;saveWorld();held=null;}};
+  ctl.addEventListener('selectstart',grab);
+  ctl.addEventListener('selectend',release);
+  hand.addEventListener('pinchstart',grab);
+  hand.addEventListener('pinchend',release);
+}
+setupCtl(0);setupCtl(1);
+
+/* ---------- 底栏 ---------- */
+const rndPos=()=>[Math.random()*3-1.5,1+Math.random(),-1.5-Math.random()*1.5];
+bAdd.onclick=()=>spawn({type:'crane',pos:rndPos()});
+bBox.onclick=()=>spawn({type:'rock',pos:rndPos()});
+bScreen.onclick=()=>spawn({type:'screen',pos:[0,1.7,-3.4]});
+bLamp.onclick=()=>spawn({type:'lamp',pos:[rndPos()[0],0,-1.5]});
+bSave.onclick=()=>{saveWorld();alert('已保存 world.json 到本机');};
+bReset.onclick=()=>{localStorage.removeItem(WORLD_KEY);location.reload();};
+
+/* ---------- 灵气粒子 ---------- */
+const pGeo=new THREE.BufferGeometry();
+const pN=400,pArr=new Float32Array(pN*3);
+for(let i=0;i<pN;i++){pArr[i*3]=Math.random()*30-15;pArr[i*3+1]=Math.random()*8;pArr[i*3+2]=Math.random()*30-15;}
+pGeo.setAttribute('position',new THREE.BufferAttribute(pArr,3));
+const pts=new THREE.Points(pGeo,new THREE.PointsMaterial({color:0x88ccff,size:.03,transparent:true,opacity:.7}));
+scene.add(pts);
+
+beacon('three-ready xr='+(navigator.xr?'yes':'no'));
+let _xrOk=false;
+function checkXR(){
+  if(!navigator.xr||_xrOk)return;
+  navigator.xr.isSessionSupported('immersive-vr').then(s=>{
+    beacon('immersive-vr-supported='+s);
+    if(s&&!_xrOk){_xrOk=true;document.querySelector('#VRButton')?.remove();document.body.appendChild(VRButton.createButton(renderer,{optionalFeatures:['hand-tracking']}));}
+  });
+}
+checkXR();setInterval(checkXR,5000);
+renderer.xr.addEventListener('sessionstart',()=>beacon('vr-enter'));
+let _fb=false;
+const clock=new THREE.Clock();
+renderer.setAnimationLoop(()=>{
+  const t=clock.getElapsedTime();
+  if(!_fb){_fb=true;beacon('first-frame-rendered');}
+  sky.material.uniforms.t.value=t;
+  pts.rotation.y=t*.02;
+  for(const o of movables)o.userData.anim&&o.userData.anim(t);
+  controls.enabled=!renderer.xr.isPresenting;
+  if(!renderer.xr.isPresenting)controls.update();
+  renderer.render(scene,camera);
+});
+</script>
+</body>
+</html>
