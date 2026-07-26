@@ -289,11 +289,18 @@ let _xrOk=false;
 function checkXR(){
   if(!navigator.xr||_xrOk)return;
   navigator.xr.isSessionSupported('immersive-vr').then(s=>{
-    beacon('immersive-vr-supported='+s);
+    beacon('immersive-vr-supported='+s+' secure='+window.isSecureContext);
     if(s&&!_xrOk){_xrOk=true;document.querySelector('#VRButton')?.remove();document.body.appendChild(VRButton.createButton(renderer,{optionalFeatures:['hand-tracking']}));}
-  });
+  }).catch(e=>beacon('xr-check-error '+String(e).slice(0,120)));
 }
 checkXR();setInterval(checkXR,5000);
+async function enterVR(){
+  try{
+    const ses=await navigator.xr.requestSession('immersive-vr',{optionalFeatures:['hand-tracking','local-floor']});
+    renderer.xr.setSession(ses);
+  }catch(e){beacon('vr-enter-error '+String(e).slice(0,140));}
+}
+renderer.domElement.addEventListener('click',()=>{if(navigator.xr&&!renderer.xr.isPresenting&&_xrOk)enterVR();});
 renderer.xr.addEventListener('sessionstart',()=>beacon('vr-enter'));
 let _fb=false;
 const clock=new THREE.Clock();
