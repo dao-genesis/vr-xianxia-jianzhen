@@ -13,6 +13,14 @@
   #bar button{background:#1e2a38;color:#ffd54f;border:1px solid #3a4a5a;border-radius:10px;
     padding:10px 14px;font-size:14px;cursor:pointer}
   #bar button:active{background:#31465c}
+  #appPanel{position:fixed;right:12px;top:12px;bottom:70px;z-index:9;width:260px;overflow:auto;
+    background:rgba(10,16,28,.92);border:1px solid #3a4a5a;border-radius:12px;padding:10px;display:none}
+  #appPanel h3{margin:2px 0 8px;color:#ffd54f;font-size:15px}
+  #appPanel .app{color:#dde;padding:7px 8px;border-radius:8px;cursor:pointer;font-size:13px;
+    display:flex;justify-content:space-between;gap:6px;align-items:center}
+  #appPanel .app:hover{background:#22344a}
+  #appPanel .app span.add{color:#7fd88f;font-size:12px;border:1px solid #3a5a3a;border-radius:6px;padding:2px 6px}
+  #appPanel .off{color:#c66;font-size:12px}
 </style>
 </head>
 <body>
@@ -28,8 +36,10 @@ VR: 手柄/手 射线指物体+扣扳机/捏合=抓取移动 · 松开=放下<br
   <button id="bSave">保存</button>
   <button id="bReset">清空</button>
   <button id="bSplat">泼溅底景</button>
+  <button id="bApps">应用之门</button>
   <button id="bVR">进入VR</button>
 </div>
+<div id="appPanel"><h3>应用之门</h3><div id="appList" class="off">未连接 daoshu-gate</div></div>
 <script type="importmap">
 {"imports":{"three":"./vendor/three.module.js",
 "three/addons/":"./vendor/",
@@ -177,6 +187,24 @@ const CATALOG={
     g.userData.toggle=()=>{const on=pt.intensity>0;pt.intensity=on?0:6;
       bulb.material.emissiveIntensity=on?0:1.2;};
     return g;}},
+  appgate:{name:'应用之门',make:async(spec)=>{
+    const g=new THREE.Group();
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(.42,.045,12,48),
+      new THREE.MeshStandardMaterial({color:0x224466,emissive:0x2266cc,emissiveIntensity:1}));
+    g.add(ring);
+    const disk=new THREE.Mesh(new THREE.CircleGeometry(.38,32),
+      new THREE.MeshBasicMaterial({color:0x0a1a30,transparent:true,opacity:.85,side:THREE.DoubleSide}));
+    g.add(disk);
+    const cv=document.createElement('canvas');cv.width=256;cv.height=96;
+    const cx=cv.getContext('2d');cx.fillStyle='#ffd54f';cx.font='bold 34px sans-serif';cx.textAlign='center';
+    cx.fillText((spec.label||spec.pkg||'应用').slice(0,8),128,58);
+    const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
+    const tag=new THREE.Mesh(new THREE.PlaneGeometry(.7,.26),
+      new THREE.MeshBasicMaterial({map:tex,transparent:true,side:THREE.DoubleSide}));
+    tag.position.y=-.62;g.add(tag);
+    g.userData.anim=t=>{ring.rotation.z=t*.4;ring.material.emissiveIntensity=.7+Math.sin(t*3)*.3;};
+    g.userData.toggle=()=>launchApp(spec.pkg,spec.label);
+    return g;}},
   gltf:{name:'外部模型',make:async(spec)=>new Promise((res,rej)=>{
     loader.load(spec.url,r=>{const g=r.scene;
       const box=new THREE.Box3().setFromObject(g);const s=1/Math.max(...box.getSize(new THREE.Vector3()).toArray());
@@ -275,6 +303,42 @@ bScreen.onclick=()=>spawn({type:'screen',pos:[0,1.7,-3.4]});
 bLamp.onclick=()=>spawn({type:'lamp',pos:[rndPos()[0],0,-1.5]});
 bSave.onclick=()=>{saveWorld();alert('已保存 world.json 到本机');};
 bReset.onclick=()=>{localStorage.removeItem(WORLD_KEY);location.reload();};
+
+/* ---------- 应用之门: daoshu-gate (localhost:8901) ---------- */
+const GATE='http://localhost:8901';
+let _gateOk=false;
+async function launchApp(pkg,label){
+  try{const r=await fetch(GATE+'/launch?pkg='+encodeURIComponent(pkg));
+    const j=await r.json();beacon('gate-launch '+pkg+' ok='+j.ok);}
+  catch(e){beacon('gate-launch-fail '+pkg);}
+}
+async function refreshApps(){
+  const list=document.getElementById('appList');
+  try{
+    const r=await fetch(GATE+'/apps');const apps=await r.json();
+    if(!_gateOk){_gateOk=true;beacon('gate-online apps='+apps.length);}
+    apps.sort((a,b)=>a.label.localeCompare(b.label,'zh'));
+    list.className='';list.innerHTML='';
+    for(const a of apps){
+      const d=document.createElement('div');d.className='app';
+      const n=document.createElement('div');n.textContent=a.label;d.appendChild(n);
+      const add=document.createElement('span');add.className='add';add.textContent='+入世界';
+      add.onclick=ev=>{ev.stopPropagation();spawn({type:'appgate',pkg:a.pkg,label:a.label,pos:rndPos()});};
+      d.appendChild(add);
+      d.onclick=()=>launchApp(a.pkg,a.label);
+      list.appendChild(d);
+    }
+  }catch(e){
+    _gateOk=false;list.className='off';
+    list.textContent='未连接 daoshu-gate(头显内安装并启动道枢主页 APK 后自动连接)';
+  }
+}
+document.getElementById('bApps').onclick=()=>{
+  const p=document.getElementById('appPanel');
+  p.style.display=p.style.display==='block'?'none':'block';
+  refreshApps();
+};
+refreshApps();setInterval(()=>{if(document.getElementById('appPanel').style.display==='block'||!_gateOk)refreshApps();},6000);
 
 /* ---------- 灵气粒子 ---------- */
 const pGeo=new THREE.BufferGeometry();
