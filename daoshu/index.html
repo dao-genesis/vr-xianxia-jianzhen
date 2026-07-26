@@ -338,6 +338,7 @@ document.getElementById('bApps').onclick=()=>{
   p.style.display=p.style.display==='block'?'none':'block';
   refreshApps();
 };
+if(location.search.indexOf('apps=1')>-1)document.getElementById('appPanel').style.display='block';
 refreshApps();setInterval(()=>{if(document.getElementById('appPanel').style.display==='block'||!_gateOk)refreshApps();},6000);
 
 /* ---------- 灵气粒子 ---------- */
