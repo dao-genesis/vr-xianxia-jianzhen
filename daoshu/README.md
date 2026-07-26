@@ -13,6 +13,12 @@
 ## 泼溅底景
 底栏「泼溅底景」按钮（或 URL 加 `?splat=1`）：加载 WorldLabs 3D 高斯泼溅场景（云端仙宫 500k·Spark 渲染），照片级真实底景替换程序化天空/地面，开关状态持久化。
 
+## 点亮即世界(主页化自启)
+`watchdog.ps1` 注册为 Windows 计划任务(daoshu-watchdog·登录自启): 监测 Quest 3 唤醒(display OFF→ON), 唤醒瞬间自动把世界容器拉到前台; 同时保底 serve.py 与 adb reverse 常在。戴上头显即在世界里, 无需手动进入任何应用。
+```
+schtasks /Create /F /TN daoshu-watchdog /SC ONLOGON /TR "powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File <path>\\watchdog.ps1"
+```
+
 ## 运行
 ```
 python serve.py            # 8899 端口·带信标日志
