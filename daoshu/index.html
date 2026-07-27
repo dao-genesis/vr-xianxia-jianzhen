@@ -36,6 +36,7 @@ VR: 手柄/手 射线指物体+扣扳机/捏合=抓取移动 · 松开=放下<br
   <button id="bSave">保存</button>
   <button id="bReset">清空</button>
   <button id="bSplat">泼溅底景</button>
+  <button id="bBase">官方基底</button>
   <button id="bApps">应用之门</button>
   <button id="bVR">进入VR</button>
 </div>
@@ -121,6 +122,45 @@ if(localStorage.getItem(SPLAT_KEY)||location.search.indexOf('splat=1')>-1)toggle
 /* ---------- 可布局物件系统: 世界=数据 ---------- */
 const movables=[];   // {obj, spec}
 const loader=new GLTFLoader();
+
+/* ---------- 官方虚拟格基底(Meta Horizon Home 反向提取的 glTF·仅个人设备私用·资产不入库) ----------
+   把官方环境作为固定世界地基(officialBase),与用户创造的物件(movables)彻底分层:
+   基底不参与拖拽/持久化,用户内容浮于其上,类《我的世界》——底不变,可在其上自由创造。
+   glTF 路径来自 ?base=<url>,否则回退到本地私有目录(需自行放置提取产物,不随仓库分发)。*/
+const BASE_KEY='daoshu.base.v1';
+const BASE_RADIUS=85;   // 目标远景半径(略小于程序天穹 90)
+const OFFICIAL_BASE_URL=new URLSearchParams(location.search).get('base')||'./private/official/calming.gltf';
+let _base=null,_baseLoading=false;
+const setProceduralEnv=v=>{sky.visible=ground.visible=grid.visible=v;};
+async function toggleOfficialBase(){
+  if(_base){scene.remove(_base);_base.traverse(o=>{o.geometry&&o.geometry.dispose();});_base=null;
+    if(!_splat)setProceduralEnv(true);localStorage.removeItem(BASE_KEY);beacon('base-off');return;}
+  if(_baseLoading)return;_baseLoading=true;
+  try{
+    beacon('base-loading '+OFFICIAL_BASE_URL);
+    const g=await loader.loadAsync(OFFICIAL_BASE_URL);
+    const root=g.scene;root.name='officialBase';
+    root.traverse(o=>{o.userData.official=true;
+      (Array.isArray(o.material)?o.material:o.material?[o.material]:[]).forEach(m=>{m.fog=false;});
+    });
+    // 忠于官方: vista 以 Meta 世界坐标/尺度(米)围绕原点(即视点)布置,默认原样放置。
+    // 官方原点=站立点,故不做 bbox 重心平移(否则天幕面会主导包围盒把整体缩成一点)。
+    // 需要微调时用 ?basescale=&?basey=&?baserot= 覆盖。
+    const q=new URLSearchParams(location.search);
+    root.scale.setScalar(parseFloat(q.get('basescale'))||1);
+    root.position.y=parseFloat(q.get('basey'))||0;
+    root.rotation.y=(parseFloat(q.get('baserot'))||0)*Math.PI/180;
+    root.renderOrder=-1;   // 先画基底
+    scene.add(root);_base=root;
+    setProceduralEnv(false);
+    const bb=new THREE.Box3().setFromObject(root),sz=new THREE.Vector3();bb.getSize(sz);
+    localStorage.setItem(BASE_KEY,'1');
+    beacon('base-on meshes='+root.children.length+' size='+[sz.x,sz.y,sz.z].map(v=>v.toFixed(1)).join('x'));
+  }catch(e){beacon('base-error '+String(e).slice(0,120));}
+  _baseLoading=false;
+}
+document.getElementById('bBase').onclick=toggleOfficialBase;
+if(localStorage.getItem(BASE_KEY)||/[?&]base/.test(location.search))toggleOfficialBase();
 const CATALOG={
   crane:{name:'仙鹤',make:async()=>{ // 程序化仙鹤(免外网模型依赖): 身+颈+翅
     const g=new THREE.Group();

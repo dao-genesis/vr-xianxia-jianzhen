@@ -1,3 +1,7 @@
+# Private reverse-extracted official Meta env assets (personal-device use only; never distribute)
+daoshu/private/
+*.apk
+
 # Dev/test artifacts
 _e2e_full.py
 _e2e_*.log

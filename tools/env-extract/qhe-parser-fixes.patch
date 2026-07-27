@@ -1,0 +1,93 @@
+diff --git a/QuestHomeEditor/CMakeLists.txt b/QuestHomeEditor/CMakeLists.txt
+index b1f7c80..d3879d1 100644
+--- a/QuestHomeEditor/CMakeLists.txt
++++ b/QuestHomeEditor/CMakeLists.txt
+@@ -319,6 +319,29 @@ else()
+     target_link_libraries(hsl_cook PRIVATE Threads::Threads m)
+ endif()
+ 
++# ── hsl_extract — headless official-env → glTF 2.0 extractor (no Vulkan/GLFW) ──
++# Reuses SceneLoader + gltf_export to dump a modern (V205) Meta env APK to glTF for daoshu.
++add_executable(hsl_extract src/tools/hsl_extract.cpp src/cook/hzanim_acl.cpp src/cook/physx_navmesh.cpp src/cook/embedded_assets.cpp src/impl/stb_image_impl.c)
++target_include_directories(hsl_extract PRIVATE
++    "${MINIZ_DIR}"
++    "${STB_DIR}"
++    "${astcenc_SOURCE_DIR}/Source"
++    "${CMAKE_SOURCE_DIR}"
++    "${CMAKE_SOURCE_DIR}/src"
++    "${CMAKE_SOURCE_DIR}/third_party/acl/includes"
++    "${CMAKE_SOURCE_DIR}/third_party/rtm/includes"
++)
++target_link_libraries(hsl_extract PRIVATE miniz ${ASTCENC_LIB})
++if(HSR_HAVE_PHYSX)
++    target_link_libraries(hsl_extract PRIVATE hsr_physx)
++endif()
++if(WIN32)
++    target_compile_definitions(hsl_extract PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
++    target_link_libraries(hsl_extract PRIVATE bcrypt crypt32)
++else()
++    target_link_libraries(hsl_extract PRIVATE Threads::Threads m)
++endif()
++
+ option(HSR_BUILD_TESTS "Build Quest Home Editor regression tests" ON)
+ if(HSR_BUILD_TESTS)
+     enable_testing()
+diff --git a/QuestHomeEditor/src/loaders/rendtxtr_parser.h b/QuestHomeEditor/src/loaders/rendtxtr_parser.h
+index 3c9665e..4a1fe72 100644
+--- a/QuestHomeEditor/src/loaders/rendtxtr_parser.h
++++ b/QuestHomeEditor/src/loaders/rendtxtr_parser.h
+@@ -25,6 +25,7 @@ struct RendtxtrInfo {
+     // length is the correct one (works for any env: nuxd, haven2025, ...).
+     u32 blockW = 8;
+     u32 blockH = 8;
++    u32 faces  = 1;          // 6 for cubemap skyboxes (payload = 6 concatenated faces)
+ };
+ 
+ // ── FlatBuffer vtable helpers (RENDTXTR header layout differs per env, so resolve
+@@ -130,6 +131,17 @@ inline bool parseRendtxtrHeader(const std::vector<u8>& data, RendtxtrInfo& info)
+             }
+         }
+     }
++    // CUBEMAP skyboxes: the payload is 6 concatenated faces (each a full mip-chain, or mip0
++    // only), so no single-texture block matches rawLen (e.g. calming skybox 1536² = 6×6 ×6
++    // faces = 8388768 B). Detect the ×6 layout; decode() then reads face 0's mip0 as the backdrop.
++    if (info.blockW == 0) {
++        for (auto& b : kAstcBlocks) {
++            if (astcMipChainBytes(info.width, info.height, b[0], b[1]) * 6 == rawLen ||
++                astcMip0Bytes(info.width, info.height, b[0], b[1]) * 6 == rawLen) {
++                info.blockW = b[0]; info.blockH = b[1]; info.faces = 6; break;
++            }
++        }
++    }
+     // Last resort: legacy formatCode guess so we still attempt a decode.
+     if (info.blockW == 0) {
+         astcBlockSize(info.formatCode, info.blockW, info.blockH);
+diff --git a/QuestHomeEditor/src/loaders/scene_loader.h b/QuestHomeEditor/src/loaders/scene_loader.h
+index 11d0b06..3f9365f 100644
+--- a/QuestHomeEditor/src/loaders/scene_loader.h
++++ b/QuestHomeEditor/src/loaders/scene_loader.h
+@@ -366,13 +366,23 @@ public:
+             }
+         }
+ 
+-        // Helper: resolve any AssetKey → path string (tries real pkg then pkg=0).
++        // Last-resort index by ingestion id alone. Some refs (notably shellconfig's
++        // firstWorldAssetId in current-gen envs — haven2025/home_c25) carry tgt=0
++        // ("unspecified"), while the manifest entry has a real tgt. The ingestion id is a
++        // large unique hash, so an ing-only match recovers the asset. Only consulted after
++        // exact (pkg,ing,tgt) and (0,ing,tgt) both miss, so it never changes working lookups.
++        std::unordered_map<u64, const std::string*> ingIndex;
++        for (auto& kv : assetMap) if (kv.first.pkg != 0) ingIndex.emplace(kv.first.ing, &kv.second);
++
++        // Helper: resolve any AssetKey → path string (tries real pkg then pkg=0, then ing-only).
+         auto resolve = [&](const AssetKey& k) -> const std::string* {
+             auto it = assetMap.find(k);
+             if (it != assetMap.end()) return &it->second;
+             AssetKey k0 = k; k0.pkg = 0;
+             it = assetMap.find(k0);
+             if (it != assetMap.end()) return &it->second;
++            auto ii = ingIndex.find(k.ing);
++            if (ii != ingIndex.end()) return ii->second;
+             return nullptr;
+         };
+ 
