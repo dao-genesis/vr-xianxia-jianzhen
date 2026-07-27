@@ -147,7 +147,13 @@ async function toggleOfficialBase(){
     // 官方原点=站立点,故不做 bbox 重心平移(否则天幕面会主导包围盒把整体缩成一点)。
     // 需要微调时用 ?basescale=&?basey=&?baserot= 覆盖。
     const q=new URLSearchParams(location.search);
-    root.scale.setScalar(parseFloat(q.get('basescale'))||1);
+    // 官方转储可能以厘米为单位(包围盒上万):无显式 basescale 时自动归一到米。
+    let baseScale=parseFloat(q.get('basescale'));
+    if(!baseScale){
+      const bb0=new THREE.Box3().setFromObject(root),sz0=new THREE.Vector3();bb0.getSize(sz0);
+      baseScale=Math.max(sz0.x,sz0.y,sz0.z)>2000?0.01:1;
+    }
+    root.scale.setScalar(baseScale);
     root.position.y=parseFloat(q.get('basey'))||0;
     root.rotation.y=(parseFloat(q.get('baserot'))||0)*Math.PI/180;
     root.renderOrder=-1;   // 先画基底
@@ -265,6 +271,7 @@ function serialize(){return movables.map(o=>({...o.userData.spec,
   pos:o.position.toArray().map(v=>+v.toFixed(3)),rotY:+o.rotation.y.toFixed(3)}));}
 function saveWorld(){localStorage.setItem(WORLD_KEY,JSON.stringify(serialize()));}
 async function loadWorld(){
+  if(/[?&]resetworld/.test(location.search))localStorage.removeItem(WORLD_KEY);
   let d;try{d=JSON.parse(localStorage.getItem(WORLD_KEY));}catch(e){}
   if(!d||!d.length)d=[ // 默认主页布局
     {type:'crane',pos:[-1.6,1.1,-2.2]},
@@ -273,6 +280,7 @@ async function loadWorld(){
     {type:'lamp',pos:[2.4,0,-1.2]},
   ];
   for(const s of d)await spawn(s,false);
+  beacon('world-loaded n='+movables.length);
 }
 loadWorld();
 
