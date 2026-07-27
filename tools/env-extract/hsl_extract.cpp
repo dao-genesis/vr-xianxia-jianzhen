@@ -20,6 +20,9 @@ int main(int argc, char** argv) {
 
     SceneLoader loader;
     loader.verbose = (std::getenv("HSL_VERBOSE") != nullptr);
+    // Full extraction of every sublevel (boulders/plants/logs/treecards) by default; set
+    // HSL_SCENEONLY to restrict to the draw-faithful set libshell renders from firstWorldAssetId.
+    loader.loadAllLevels = (std::getenv("HSL_SCENEONLY") == nullptr);
     if (!loader.load(apk)) {
         fprintf(stderr, "[extract] FATAL: scene load failed for %s\n", apk.c_str());
         return 1;
