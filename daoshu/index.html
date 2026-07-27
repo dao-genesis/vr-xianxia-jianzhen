@@ -271,6 +271,7 @@ function serialize(){return movables.map(o=>({...o.userData.spec,
   pos:o.position.toArray().map(v=>+v.toFixed(3)),rotY:+o.rotation.y.toFixed(3)}));}
 function saveWorld(){localStorage.setItem(WORLD_KEY,JSON.stringify(serialize()));}
 async function loadWorld(){
+  if(/[?&]resetworld/.test(location.search))localStorage.removeItem(WORLD_KEY);
   let d;try{d=JSON.parse(localStorage.getItem(WORLD_KEY));}catch(e){}
   if(!d||!d.length)d=[ // 默认主页布局
     {type:'crane',pos:[-1.6,1.1,-2.2]},
@@ -279,6 +280,7 @@ async function loadWorld(){
     {type:'lamp',pos:[2.4,0,-1.2]},
   ];
   for(const s of d)await spawn(s,false);
+  beacon('world-loaded n='+movables.length);
 }
 loadWorld();
 
