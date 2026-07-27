@@ -15,6 +15,8 @@
 | `hsl_extract.cpp` | 无头(无 Vulkan/GLFW)提取器 `main`：加载 env→导出 glTF，可选合并 companion 包。默认**全量**模式(见下),`HSL_SCENEONLY` 可退回只导 runtime 绘制子集 |
 | `hsl_bulk.cpp` | 场景图无关的**穷举**转储:直接遍历 `scene.zip` 每个 cooked 子目标,解码所有 RENDMESH/RENDTXTR(不依赖可达性,作兜底对照) |
 | `qhe-parser-fixes.patch` | 对 Quest-Home-Editor 的解析修复(见下) + `hsl_extract`/`hsl_bulk` 的 CMake target |
+| `extract.sh` | **一条命令**跑通:拉取+patch Quest-Home-Editor → 构建 `hsl_extract` → 提取 → Quest 贴图优化。见「快速一条命令」 |
+| `optimize_textures.py` | 贴图后处理:限分辨率 + 不透明转 JPEG / 带 alpha 留 PNG,重写 glTF 贴图 URI。把 officialBase 从数百 MB 压到 Quest 可加载的量级 |
 
 ## 解析修复(patch 内容)
 
@@ -43,6 +45,19 @@
    (calming 天空盒 1536² = 6×6 ASTC × 6 面 = 8,388,768 B) → 旧逻辑回退到错误 formatCode 猜测,
    解出**横向错位条纹**。加 ×6 布局识别,取 face 0 的 mip0 作背景 → 天空盒净解。
 
+## 快速一条命令(推荐)
+
+```bash
+# <env.apk> <outDir> [name] [--max 1024] [--quality 85] [--raw]
+tools/env-extract/extract.sh vista_calming.apk ./out calming
+```
+
+自动:拉取+patch Quest-Home-Editor → 构建 `hsl_extract` → 全量提取 → 贴图 Quest 优化。
+产物落在 `./out/calming.gltf` + `calming.bin` + `textures/`,直接拷进 `daoshu/private/official/` 即可。
+`--raw` 跳过优化保留全分辨率;依赖见脚本头部注释(含 `python3-pil`)。
+
+手动分步见下。
+
 ## 构建
 
 ```bash
@@ -69,6 +84,19 @@ HSL_SCENEONLY=1 ./build/hsl_extract vista_calming.apk ./out_scene calming
 
 产物：`out/calming.gltf` + `out/calming.bin` + `out/textures/*.png`。
 
+### 贴图优化(Quest 可加载)
+
+全分辨率原始转储很重(calming: 248 张 PNG、约 515 MB、137 张 ≥1024px),Quest 3 浏览器
+把它当背景基底解码会**卡住**。`optimize_textures.py` 限分辨率 + 重编码(不透明→JPEG,带 alpha→PNG)
+并重写 glTF 贴图 URI:
+
+```bash
+python3 optimize_textures.py out/calming.gltf out_opt --max 1024 --quality 85
+```
+
+calming 实测:**515 MB → 103 MB**(87 JPEG + 161 PNG,均 ≤1024px,184 网格/材质不变)。
+`extract.sh` 默认已内置此步。
+
 calming 实测(修复前后对照,同一 APK):
 
 | 模式 | 网格 | 说明 |
@@ -89,3 +117,16 @@ daoshu/index.html?basescale=90&basey=-3      # 也可点底栏「官方基底」
 
 `officialBase` 与用户创造的物件(`movables`)彻底分层：基底不参与拖拽/持久化，
 用户内容浮于其上 —— 类《我的世界》：底不变，可在其上自由创造。
+
+> ⚠️ **部署注意**：`officialBase` 代码在仓库 `daoshu/index.html` 里,但**实际对外服务
+> (serve.py)的那台机器上的 `index.html` 必须是含 officialBase 的版本**。若服务机跑的是旧副本,
+> 页面不会加载基底(无 `base-*` 信标)。部署 = 同步最新 `index.html` + 放好 `private/official/` 产物,
+> 再开 `daoshu/index.html?base`(或点底栏「官方基底」)。
+
+## 真机实测(2026-07,vista_calming)
+
+- 提取器无头 Linux 构建通过 → `hsl_extract vista_calming.apk` 输出 **184 网格 / 0 跳过**(全解码)。
+- 贴图优化 515 MB → 103 MB,产物部署到服务机 `daoshu/private/official/`(gitignore)。
+- Quest 3 浏览器打开 `index.html?base`:`base-loading ./private/official/calming.gltf` 信标已触发,
+  glTF/bin/贴图 均 200,three.js 开始解码。**完整 `base-on` 渲染 + 沉浸 VR 需真人佩戴头显**
+  (头显闲置休眠会暂停浏览器,断开 adb) —— 属人工验证环节。
